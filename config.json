@@ -1,0 +1,49 @@
+{
+  "random_seed": 42,
+  "data": {
+    "root": "data",
+    "prices_equity": "data/prices_equity.csv",
+    "prices_etf": "data/prices_etf.csv",
+    "etf_flows": "data/etf_flows.csv",
+    "etf_holdings": "data/etf_holdings.csv",
+    "rebalance_events": "data/rebalance_events.csv"
+  },
+  "universe": {
+    "etfs": ["SPY", "QQQ"],
+    "max_constituents_per_etf": 100
+  },
+  "strategy": {
+    "hold_period_days": 1,
+    "top_k_constituents": 15,
+    "min_weight_threshold": 0.002,
+    "flow_z_score_window": 60,
+    "selection_side": "both",
+    "use_risk_parity": true,
+    "hedge_with_parent_etf": true,
+    "beta_hedge_method": "notional",
+    "gross_leverage": 1.0
+  },
+  "costs": {
+    "bps_per_trade_equity": 3.0,
+    "bps_per_trade_etf": 1.0
+  },
+  "backtest": {
+    "trade_at": "next_open",
+    "slippage_bps": 1.0,
+    "start_date": null,
+    "end_date": null
+  },
+  "robustness": {
+    "walkforward_window_months": 12,
+    "oos_window_months": 3,
+    "param_grid": {
+      "top_k_constituents": [10, 15, 20, 30],
+      "hold_period_days": [1, 2, 3],
+      "flow_z_score_window": [40, 60, 90],
+      "gross_leverage": [0.75, 1.0, 1.5]
+    }
+  },
+  "output": {
+    "results_dir": "results"
+  }
+}

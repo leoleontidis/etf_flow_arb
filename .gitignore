@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.venv/
+.env
+
+# Project
+data/*.csv
+data/*.parquet
+data/raw/
+results/
+results/*.png
+results/*.html

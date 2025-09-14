@@ -6,8 +6,7 @@ The core idea is that ETF fund flows and periodic rebalancing create predictable
 
 The project is designed for quant researchers, algorithmic traders, and systematic investors aiming to build structural, non-retail strategies.
 
-⚙️ Core Logic
-
+## ⚙️ Core Logic
 The framework follows a clear signal-to-trade pipeline:
 
 1. ETF Flow Signal
@@ -47,8 +46,7 @@ The framework follows a clear signal-to-trade pipeline:
 - Out-of-sample validation.
 - Stress tests (costs, slippage, noise).
 
-✨Features
-
+## 🚀Features
 - ETF flow signal engine: uses either issuer NAV/Shares Outstanding or ETF.com flows.
 - Holdings propagation: converts ETF-level flows into constituent-level signals.
 - Flexible allocation: risk parity or equal-weighted.
@@ -68,7 +66,7 @@ The framework follows a clear signal-to-trade pipeline:
  - Add leveraged ETF hedging flows
  - Integrate ADR/local arb in the same structure
 
-📂 Repository Structure
+## 📂 Repository Structure
 etf_flow_arb/
 ├─ README.md                # Project overview & documentation
 ├─ requirements.txt         # Python dependencies

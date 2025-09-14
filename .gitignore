@@ -17,9 +17,9 @@ Thumbs.db
 .env
 
 # Project
-data/*.csv
-data/*.parquet
-data/raw/
+data/
 results/
-results/*.png
-results/*.html
+
+# editors
+.vscode/
+.idea/

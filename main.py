@@ -34,17 +34,42 @@ def run_backtest(cfg_path: str = "config.json"):
     pres = propagate_flow_to_constituents(flow_f, holds, min_weight=cfg.strategy.min_weight_threshold)
     picks = select_constituents(pres, top_k=cfg.strategy.top_k_constituents, side=cfg.strategy.selection_side)
 
-    # After 'picks' creation:
-    picks_reset = picks.reset_index().rename(columns={"constituent":"ticker"})
-    picks_reset.to_csv(f"{cfg.output.results_dir}/signals_constituent.csv", index=False)
-
     # Position sizing
     pos = compute_position_sizes(picks, equity_vol=vol, gross_leverage=cfg.strategy.gross_leverage,
-                                 use_risk_parity=cfg.strategy.use_risk_parity)
+                                use_risk_parity=cfg.strategy.use_risk_parity)
 
-    # After 'pos' creation:
-    pos_reset = pos.reset_index().rename(columns={"ticker":"constituent"})
-    pos_reset.to_csv(f"{cfg.output.results_dir}/positions_target.csv", index=False)
+    # ---------- SAVE SIGNALS (lagged) ----------
+    # Build constituent signal from holdings × flow_z (from flow_f), then lag 1 day.
+    flows_df = flow_f.reset_index()[["date", "etf", "flow_z"]]
+    holds_df = holds.reset_index()[["date", "etf", "constituent", "weight"]]
+    sigc = holds_df.merge(flows_df, on=["date", "etf"], how="left")
+
+    # clean + pressure
+    sigc["weight"]  = pd.to_numeric(sigc["weight"], errors="coerce").fillna(0.0)
+    sigc["flow_z"]  = pd.to_numeric(sigc["flow_z"], errors="coerce").fillna(0.0)
+    sigc["pressure"] = sigc["weight"] * sigc["flow_z"]
+
+    # aggregate across ETFs per stock, lag to enforce t+1 trading
+    consig = (sigc.groupby(["date","constituent"], as_index=False)["pressure"].sum()
+                .rename(columns={"constituent":"ticker"})
+                .sort_values(["ticker","date"]))
+    consig["signal"] = consig.groupby("ticker")["pressure"].shift(1)
+
+    # write
+    consig.to_csv(f"{cfg.output.results_dir}/signals_constituent.csv", index=False)
+    print("[signals] wrote results/signals_constituent.csv")
+
+    # ---------- SAVE POSITIONS (for deep_dive exposure) ----------
+    pos_reset = pos.reset_index()
+    # normalize column names
+    if "constituent" in pos_reset.columns and "ticker" not in pos_reset.columns:
+        pos_reset = pos_reset.rename(columns={"constituent":"ticker"})
+    # keep minimal columns
+    cols = [c for c in ["date","ticker","target_w"] if c in pos_reset.columns]
+    pos_out = pos_reset[cols].copy()
+    pos_out.to_csv(f"{cfg.output.results_dir}/positions_target.csv", index=False)
+    print("[positions] wrote results/positions_target.csv")
+
 
     # Backtest
     trades, daily = backtest_flow_strategy(

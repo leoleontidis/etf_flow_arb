@@ -109,6 +109,9 @@ source .venv/bin/activate   # or .venv\Scripts\activate on Windows
 
 pip install -r requirements.txt
 
+# Reset data (clears data and results folder for a fresh run)
+python reset.py
+
 # Build data (fetches prices, standardizes holdings/flows)
 python make_data.py
 

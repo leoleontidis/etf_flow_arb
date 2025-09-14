@@ -59,108 +59,195 @@ def kpis_from_daily(daily: pd.DataFrame) -> dict:
             "sharpe": float(sharpe), "max_drawdown": float(mdd)}
 
 # ---------- analyses ----------
-def rolling_parent_exposure(trades: pd.DataFrame):
+def rolling_parent_exposure(_trades: pd.DataFrame):
     """
-    Approximate net parent ETF exposure by summing target weights of hedge tickers (SPY/QQQ/IWM).
-    Writes CSV + PNG.
+    Prefer positions_target.csv if present; else try trades.csv.
+    If SPY/QQQ/IWM hedges exist -> plot their net exposure.
+    Otherwise -> plot net *portfolio* exposure (sum of all non-parent weights).
+    Writes one of:
+      results/deep_dive/net_parent_exposure.csv + .png
+      results/deep_dive/net_portfolio_exposure.csv + .png
     """
-    df = trades.copy()
-    name_col = "ticker" if "ticker" in df.columns else ("instrument" if "instrument" in df.columns else None)
-    if not name_col:
+    ensure_dir(FIG_DIR)
+
+    pos_path = os.path.join("results", "positions_target.csv")
+    if os.path.exists(pos_path):
+        df = pd.read_csv(pos_path, parse_dates=["date"])
+    else:
+        df = _trades.copy()
+
+    name_col = "ticker" if "ticker" in df.columns else ("constituent" if "constituent" in df.columns else None)
+    if name_col is None or "target_w" not in df.columns:
         return None
-    parents = {"SPY", "QQQ", "IWM"}
+
     df["date"] = pd.to_datetime(df["date"])
-    df["is_parent"] = df[name_col].isin(parents)
-    hed = (df[df["is_parent"]]
-             .groupby("date")["target_w"]
+    parents = {"SPY", "QQQ", "IWM"}
+
+    if df[name_col].isin(parents).any():
+        hed = (df[df[name_col].isin(parents)]
+                 .groupby("date")["target_w"]
+                 .sum()
+                 .rename("net_parent_w")
+                 .reset_index())
+        hed.to_csv(os.path.join(FIG_DIR, "net_parent_exposure.csv"), index=False)
+        plot_series(hed, "date", "net_parent_w",
+                    "Net Parent Exposure (sum target_w of SPY/QQQ/IWM)",
+                    os.path.join(FIG_DIR, "net_parent_exposure.png"))
+        return hed
+
+    net = (df.groupby("date")["target_w"]
              .sum()
-             .rename("net_parent_w")
+             .rename("net_portfolio_w")
              .reset_index())
-    plot_series(hed, "date", "net_parent_w",
-                "Net Parent Exposure (sum target_w of SPY/QQQ/IWM)",
-                os.path.join(FIG_DIR, "net_parent_exposure.png"))
-    hed.to_csv(os.path.join(FIG_DIR, "net_parent_exposure.csv"), index=False)
-    return hed
+    net.to_csv(os.path.join(FIG_DIR, "net_portfolio_exposure.csv"), index=False)
+    plot_series(net, "date", "net_portfolio_w",
+                "Net Portfolio Exposure (no explicit SPY/QQQ/IWM hedge found)",
+                os.path.join(FIG_DIR, "net_portfolio_exposure.png"))
+    return net
 
 def decile_buckets(signals_const: pd.DataFrame, pe: pd.DataFrame):
     """
     Monotonicity: decile of prior-day signal vs next-day open->close returns.
-    Writes CSV + PNG + TXT.
+    If 'signal' exists (already lagged by the backtest), use it directly.
+    Otherwise, we lag the chosen raw column by 1 day per ticker.
+    Outputs:
+      results/deep_dive/decile_avg_nextday_return.csv
+      results/deep_dive/decile_monotonicity.png
     """
-    if signals_const is None or signals_const.empty:
+    ensure_dir(FIG_DIR)
+
+    # Guards
+    if signals_const is None or signals_const.empty or pe is None or pe.empty:
+        pd.Series(dtype=float).to_csv(os.path.join(FIG_DIR, "decile_avg_nextday_return.csv"))
         return None
 
     sc = signals_const.copy()
-    sig_col = next((c for c in ["signal", "pressure", "flow_z"] if c in sc.columns), None)
-    if sig_col is None:
-        return None
-
     tick_col = "ticker" if "ticker" in sc.columns else ("constituent" if "constituent" in sc.columns else None)
-    if not tick_col:
+    if tick_col is None:
+        pd.Series(dtype=float).to_csv(os.path.join(FIG_DIR, "decile_avg_nextday_return.csv"))
         return None
 
-    pe2 = pe.sort_values(["ticker","date"]).copy()
-    pe2["ret_oc"] = (pe2["close"] / pe2["open"]) - 1.0
-    sc["date"]  = pd.to_datetime(sc["date"])
+    # Choose a source column: prefer fully lagged 'signal', else raw 'pressure'/'flow_z'
+    raw_sig_col = None
+    for c in ["pressure", "flow_z"]:
+        if c in sc.columns:
+            raw_sig_col = c
+            break
+
+    sc["date"] = pd.to_datetime(sc["date"])
+    sc = sc.sort_values([tick_col, "date"])
+
+    if "signal" in sc.columns:
+        sc["signal_lag"] = pd.to_numeric(sc["signal"], errors="coerce")
+    else:
+        if raw_sig_col is None:
+            pd.Series(dtype=float).to_csv(os.path.join(FIG_DIR, "decile_avg_nextday_return.csv"))
+            return None
+        sc[raw_sig_col] = pd.to_numeric(sc[raw_sig_col], errors="coerce")
+        sc["signal_lag"] = sc.groupby(tick_col)[raw_sig_col].shift(1)
+
+    # Next-day OC returns
+    pe2 = pe.sort_values(["ticker", "date"]).copy()
     pe2["date"] = pd.to_datetime(pe2["date"])
+    pe2["ret_oc"] = (pe2["close"] / pe2["open"]) - 1.0
 
-    sc = sc.sort_values([tick_col,"date"])
-    sc["signal_lag"] = sc.groupby(tick_col)[sig_col].shift(1)
+    df = (sc.rename(columns={tick_col: "ticker"})[["date", "ticker", "signal_lag"]]
+            .merge(pe2[["date", "ticker", "ret_oc"]], on=["date", "ticker"], how="inner")
+            .dropna(subset=["signal_lag", "ret_oc"]))
 
-    df = sc.rename(columns={tick_col:"ticker"})[["date","ticker","signal_lag"]].merge(
-        pe2[["date","ticker","ret_oc"]], on=["date","ticker"], how="inner"
-    ).dropna(subset=["signal_lag","ret_oc"])
+    if df.empty:
+        pd.Series(dtype=float).to_csv(os.path.join(FIG_DIR, "decile_avg_nextday_return.csv"))
+        return None
 
-    # daily cross-section deciles
-    def decile_groups(x):
+    # Adaptive deciles per day (up to 10, but <= cross-section size)
+    def decile_groups(x: pd.DataFrame) -> pd.DataFrame:
+        n = len(x)
+        if n < 3:
+            x["decile"] = np.nan
+            return x
+        q = min(10, n)
         try:
-            q = pd.qcut(x["signal_lag"], 10, labels=False, duplicates="drop")
+            bins = pd.qcut(x["signal_lag"], q, labels=False, duplicates="drop")
         except Exception:
-            q = pd.Series([np.nan]*len(x), index=x.index)
-        return x.assign(decile=q)
+            bins = pd.Series([np.nan] * n, index=x.index)
+        return x.assign(decile=bins)
 
-    df = df.groupby("date", group_keys=False).apply(decile_groups).dropna(subset=["decile"])
+    df = df.groupby("date", group_keys=False).apply(decile_groups)
+    df = df.dropna(subset=["decile"])
+    if df.empty:
+        pd.Series(dtype=float).to_csv(os.path.join(FIG_DIR, "decile_avg_nextday_return.csv"))
+        return None
+
     by_dec = df.groupby("decile")["ret_oc"].mean()
     by_dec.to_csv(os.path.join(FIG_DIR, "decile_avg_nextday_return.csv"))
-    plot_bar(by_dec, "Avg Next-Day OC Return by Signal Decile (0=lowest, 9=highest)",
-             os.path.join(FIG_DIR, "decile_monotonicity.png"))
 
-    spread = by_dec.get(9, np.nan) - by_dec.get(0, np.nan)
+    # Plot
+    fig = plt.figure(figsize=(10, 4))
+    ax = fig.add_subplot(111)
+    by_dec.plot(kind="bar", ax=ax)
+    ax.set_title("Avg Next-Day OC Return by Signal Decile (0=lowest, 9=highest)")
+    _savefig(os.path.join(FIG_DIR, "decile_monotonicity.png"))
+
+    # Spread
+    spread = by_dec.get(by_dec.index.max(), np.nan) - by_dec.get(by_dec.index.min(), np.nan)
     with open(os.path.join(FIG_DIR, "decile_monotonicity.txt"), "w") as f:
         f.write(f"Top-bottom decile next-day OC return spread: {spread:.6f}\n")
+
     return by_dec
 
 def daily_ic(signals_const: pd.DataFrame, pe: pd.DataFrame):
     """
     Daily cross-sectional IC: corr(signal_{t-1}, next-day OC return).
-    Writes CSV + PNG.
+    If 'signal' exists (already lagged), use it directly; else lag raw column.
+    Outputs:
+      results/deep_dive/daily_ic.csv
+      results/deep_dive/daily_ic.png
     """
-    if signals_const is None or signals_const.empty:
+    ensure_dir(FIG_DIR)
+
+    if signals_const is None or signals_const.empty or pe is None or pe.empty:
+        pd.DataFrame(columns=["date", "ic"]).to_csv(os.path.join(FIG_DIR, "daily_ic.csv"), index=False)
         return None
 
     sc = signals_const.copy()
-    sig_col = next((c for c in ["signal", "pressure", "flow_z"] if c in sc.columns), None)
-    if sig_col is None:
-        return None
-
     tick_col = "ticker" if "ticker" in sc.columns else ("constituent" if "constituent" in sc.columns else None)
-    if not tick_col:
+    if tick_col is None:
+        pd.DataFrame(columns=["date", "ic"]).to_csv(os.path.join(FIG_DIR, "daily_ic.csv"), index=False)
         return None
 
-    pe2 = pe.sort_values(["ticker","date"]).copy()
-    pe2["ret_oc"] = (pe2["close"] / pe2["open"]) - 1.0
-    sc["date"]  = pd.to_datetime(sc["date"])
+    raw_sig_col = None
+    for c in ["pressure", "flow_z"]:
+        if c in sc.columns:
+            raw_sig_col = c
+            break
+
+    sc["date"] = pd.to_datetime(sc["date"])
+    sc = sc.sort_values([tick_col, "date"])
+
+    if "signal" in sc.columns:
+        sc["signal_lag"] = pd.to_numeric(sc["signal"], errors="coerce")
+    else:
+        if raw_sig_col is None:
+            pd.DataFrame(columns=["date", "ic"]).to_csv(os.path.join(FIG_DIR, "daily_ic.csv"), index=False)
+            return None
+        sc[raw_sig_col] = pd.to_numeric(sc[raw_sig_col], errors="coerce")
+        sc["signal_lag"] = sc.groupby(tick_col)[raw_sig_col].shift(1)
+
+    pe2 = pe.sort_values(["ticker", "date"]).copy()
     pe2["date"] = pd.to_datetime(pe2["date"])
+    pe2["ret_oc"] = (pe2["close"] / pe2["open"]) - 1.0
 
-    sc = sc.sort_values([tick_col,"date"])
-    sc["signal_lag"] = sc.groupby(tick_col)[sig_col].shift(1)
+    df = (sc.rename(columns={tick_col: "ticker"})[["date", "ticker", "signal_lag"]]
+            .merge(pe2[["date", "ticker", "ret_oc"]], on=["date", "ticker"], how="inner")
+            .dropna(subset=["signal_lag", "ret_oc"]))
 
-    df = sc.rename(columns={tick_col:"ticker"})[["date","ticker","signal_lag"]].merge(
-        pe2[["date","ticker","ret_oc"]], on=["date","ticker"], how="inner"
-    ).dropna(subset=["signal_lag","ret_oc"])
+    if df.empty:
+        pd.DataFrame(columns=["date", "ic"]).to_csv(os.path.join(FIG_DIR, "daily_ic.csv"), index=False)
+        return None
 
-    def day_corr(x):
-        if len(x) < 3: return np.nan
+    def day_corr(x: pd.DataFrame) -> float:
+        if len(x) < 3:
+            return np.nan
         return x["signal_lag"].corr(x["ret_oc"])
 
     ic = df.groupby("date").apply(day_corr).rename("ic").reset_index()

@@ -14,34 +14,28 @@ The framework follows a clear signal-to-trade pipeline:
 - Normalize via rolling z-scores.
 
 2. Propagation to Constituents
-
 - Apply daily ETF holdings weights to distribute flow pressure across stocks.
 - Result: “pressure” score per constituent.
 
 3. Constituent Selection
-
 - Rank stocks by pressure.
 - Select top/bottom k names for long/short positions.
 
 4. Portfolio Construction
-
 - Position sizing via risk parity or equal-weighting.
 - Apply gross leverage scaling.
 
 5. Hedging
-
 - Neutralize ETF-level exposure with the parent ETF (SPY, QQQ, etc.).
 - Hedge method: notional or regression-based.
 
 6. Backtesting
-
 - Simulate realistic trading:
   - Trade-at-next-open or trade-at-close.
   - Transaction costs & slippage.
   - Daily rebalance & PnL logging.
 
 7. Robustness
-
 - Walk-forward parameter grid.
 - Out-of-sample validation.
 - Stress tests (costs, slippage, noise).
@@ -67,6 +61,7 @@ The framework follows a clear signal-to-trade pipeline:
  - Integrate ADR/local arb in the same structure
 
 ## 📂 Repository Structure
+```bash
 etf_flow_arb/
 ├─ README.md                # Project overview & documentation
 ├─ requirements.txt         # Python dependencies
@@ -75,14 +70,14 @@ etf_flow_arb/
 ├─ config.json              # Strategy & backtest config
 ├─ make_data.py             # Data builder (prices, holdings, flows)
 │
-├─ data/                    # Local data (ignored by Git)
+├─ data/                    # Local data
 │   ├─ raw/                 # Raw issuer files (SPY/QQQ holdings, NAV/SO, flows)
 │   ├─ prices_equity.csv
 │   ├─ prices_etf.csv
 │   ├─ etf_holdings.csv
 │   └─ etf_flows.csv
 │
-├─ results/                 # Backtest outputs (ignored by Git)
+├─ results/                 # Backtest outputs
 │   ├─ trades.csv
 │   ├─ daily_pnl.csv
 │   ├─ summary.json
@@ -98,6 +93,7 @@ etf_flow_arb/
     ├─ robustness.py        # Walk-forward & grid search
     ├─ utils.py             # Helpers (seeding, saving, dirs)
     └─ __init__.py
+```
 
 ## Quickstart
 ```bash
@@ -105,11 +101,11 @@ git clone https://github.com/leoleontidis/etf_flow_arb.git
 cd etf_flow_arb
 
 python -m venv .venv
-source .venv/bin/activate   # or .venv\Scripts\activate on Windows
+.venv\Scripts\activate # or MacOS source .venv/bin/activate
 
 pip install -r requirements.txt
 
-# Reset data (clears data and results folder for a fresh run)
+# Reset data (can be skipped for first run - clears data and results folder for a fresh start)
 python reset.py
 
 # Build data (fetches prices, standardizes holdings/flows)
@@ -126,3 +122,4 @@ python deep_dive.py
 
 # Walk-forward robustness
 python main.py --mode walkforward
+```
